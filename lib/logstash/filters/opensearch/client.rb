@@ -1,17 +1,15 @@
 # encoding: utf-8
-require "elasticsearch"
+require "opensearch"
 require "base64"
-require "elasticsearch/transport/transport/http/manticore"
-
 
 module LogStash
   module Filters
-    class ElasticsearchClient
+    class OpenSearchClient
 
       attr_reader :client
 
       BUILD_FLAVOR_SERVERLESS = 'serverless'.freeze
-      DEFAULT_EAV_HEADER = { "Elastic-Api-Version" => "2023-10-31" }.freeze
+      DEFAULT_EAV_HEADER = { "OpenSearch-Api-Version" => "2023-10-31" }.freeze
 
       def initialize(logger, hosts, options = {})
         user = options.fetch(:user, nil)
@@ -37,17 +35,12 @@ module LogStash
 
         hosts = setup_hosts(hosts, ssl_enabled)
 
-        client_options = {
-                       hosts: hosts,
-             transport_class: ::Elasticsearch::Transport::Transport::HTTP::Manticore,
-           transport_options: transport_options,
-                         ssl: ssl_options,
-            retry_on_failure: options[:retry_on_failure],
-             retry_on_status: options[:retry_on_status]
-        }
+        # set ca_file even if ssl isn't on, since the host can be an https url
+        ssl_options = { ssl: true, ca_file: options[:ca_file] } if options[:ca_file]
+        ssl_options ||= {}
 
-        logger.info("New ElasticSearch filter client", :hosts => hosts)
-        @client = ::Elasticsearch::Client.new(client_options)
+        logger.info("New OpenSearch filter client", :hosts => hosts)
+        @client = ::OpenSearch::Client.new(hosts: hosts, transport_options: transport_options, :ssl => ssl_options)
       end
 
       def search(params={})

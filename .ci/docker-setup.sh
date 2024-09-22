@@ -1,43 +1,59 @@
 #!/bin/bash
 
 # This is intended to be run the plugin's root directory. `.ci/docker-setup.sh`
-# Ensure you have Docker installed locally and set the ELASTIC_STACK_VERSION environment variable.
+# Ensure you have Docker installed locally and set the OPENSEARCH_VERSION environment variable.
 set -e
 
 VERSION_URL="https://raw.githubusercontent.com/elastic/logstash/master/ci/logstash_releases.json"
 
-pull_docker_snapshot() {
-  local project="${1?project name required}"
-  local docker_image="docker.elastic.co/${project}/${project}${DISTRIBUTION_SUFFIX}:${ELASTIC_STACK_VERSION}"
-
-  echo "Pulling ${docker_image}"
-  docker pull "${docker_image}"
-}
-
-if [ "$ELASTIC_STACK_VERSION" ]; then
+if [ "$OPENSEARCH_VERSION" ]; then
     echo "Fetching versions from $VERSION_URL"
-    VERSIONS=$(curl -u elastic:$ELASTIC_PASSWORD --silent $VERSION_URL)
+    VERSIONS=$(curl --silent $VERSION_URL)
     if [[ "$SNAPSHOT" = "true" ]]; then
-      ELASTIC_STACK_RETRIEVED_VERSION=$(echo $VERSIONS | jq '.snapshots."'"$ELASTIC_STACK_VERSION"'"')
-      echo $ELASTIC_STACK_RETRIEVED_VERSION
+      OPENSEARCH_RETRIEVED_VERSION=$(echo $VERSIONS | jq '.snapshots."'"$OPENSEARCH_VERSION"'"')
+      echo $OPENSEARCH_RETRIEVED_VERSION
     else
-      ELASTIC_STACK_RETRIEVED_VERSION=$(echo $VERSIONS | jq '.releases."'"$ELASTIC_STACK_VERSION"'"')
+      OPENSEARCH_RETRIEVED_VERSION=$(echo $VERSIONS | jq '.releases."'"$OPENSEARCH_VERSION"'"')
     fi
-    if [[ "$ELASTIC_STACK_RETRIEVED_VERSION" != "null" ]]; then
+    if [[ "$OPENSEARCH_RETRIEVED_VERSION" != "null" ]]; then
       # remove starting and trailing double quotes
-      ELASTIC_STACK_RETRIEVED_VERSION="${ELASTIC_STACK_RETRIEVED_VERSION%\"}"
-      ELASTIC_STACK_RETRIEVED_VERSION="${ELASTIC_STACK_RETRIEVED_VERSION#\"}"
-      echo "Translated $ELASTIC_STACK_VERSION to ${ELASTIC_STACK_RETRIEVED_VERSION}"
-      export ELASTIC_STACK_VERSION=$ELASTIC_STACK_RETRIEVED_VERSION
+      OPENSEARCH_RETRIEVED_VERSION="${OPENSEARCH_RETRIEVED_VERSION%\"}"
+      OPENSEARCH_RETRIEVED_VERSION="${OPENSEARCH_RETRIEVED_VERSION#\"}"
+      echo "Translated $OPENSEARCH_VERSION to ${OPENSEARCH_RETRIEVED_VERSION}"
+      export OPENSEARCH_VERSION=$OPENSEARCH_RETRIEVED_VERSION
     fi
 
-    echo "Testing against version: $ELASTIC_STACK_VERSION"
+    echo "Testing against version: $OPENSEARCH_VERSION"
 
-    if [[ "$ELASTIC_STACK_VERSION" = *"-SNAPSHOT" ]]; then
-        pull_docker_snapshot "logstash"
+    if [[ "$OPENSEARCH_VERSION" = *"-SNAPSHOT" ]]; then
+        cd /tmp
+
+        jq=".build.projects.\"logstash\".packages.\"logstash-$OPENSEARCH_VERSION-docker-image.tar.gz\".url"
+        result=$(curl --silent https://artifacts-api.elastic.co/v1/versions/$OPENSEARCH_VERSION/builds/latest | jq -r $jq)
+        echo $result
+        curl $result > logstash-docker-image.tar.gz
+        tar xfvz logstash-docker-image.tar.gz  repositories
+        echo "Loading docker image: "
+        cat repositories
+        docker load < logstash-docker-image.tar.gz
+        rm logstash-docker-image.tar.gz
+
+        cd -
 
         if [ "$INTEGRATION" == "true" ]; then
-          pull_docker_snapshot "elasticsearch"
+          cd /tmp
+
+          jq=".build.projects.\"opensearch\".packages.\"opensearch-$OPENSEARCH_VERSION-docker-image.tar.gz\".url"
+          result=$(curl --silent https://artifacts-api.elastic.co/v1/versions/$OPENSEARCH_VERSION/builds/latest | jq -r $jq)
+          echo $result
+          curl $result > opensearch-docker-image.tar.gz
+          tar xfvz opensearch-docker-image.tar.gz  repositories
+          echo "Loading docker image: "
+          cat repositories
+          docker load < opensearch-docker-image.tar.gz
+          rm opensearch-docker-image.tar.gz
+
+          cd -
         fi
     fi
 
@@ -55,8 +71,8 @@ if [ "$ELASTIC_STACK_VERSION" ]; then
         docker-compose build logstash
     fi
 else
-    echo "Please set the ELASTIC_STACK_VERSION environment variable"
-    echo "For example: export ELASTIC_STACK_VERSION=6.2.4"
+    echo "Please set the OPENSEARCH_VERSION environment variable"
+    echo "For example: export OPENSEARCH_VERSION=6.2.4"
     exit 1
 fi
 

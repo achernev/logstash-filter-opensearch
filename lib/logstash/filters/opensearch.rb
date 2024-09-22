@@ -6,37 +6,37 @@ require 'logstash/plugin_mixins/ca_trusted_fingerprint_support'
 require "logstash/plugin_mixins/normalize_config_support"
 require "monitor"
 
-require_relative "elasticsearch/client"
-require_relative "elasticsearch/patches/_elasticsearch_transport_http_manticore"
+require_relative "opensearch/client"
+require_relative "opensearch/patches/_opensearch_transport_http_manticore"
 
-class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
-  config_name "elasticsearch"
+class LogStash::Filters::OpenSearch < LogStash::Filters::Base
+  config_name "opensearch"
 
-  # List of elasticsearch hosts to use for querying.
+  # List of opensearch hosts to use for querying.
   config :hosts, :validate => :array, :default => [ 'localhost:9200' ]
 
   # Comma-delimited list of index names to search; use `_all` or empty string to perform the operation on all indices.
   # Field substitution (e.g. `index-name-%{date_field}`) is available
   config :index, :validate => :string, :default => ""
 
-  # Elasticsearch query string. Read the Elasticsearch query string documentation.
-  # for more info at: https://www.elastic.co/guide/en/elasticsearch/reference/master/query-dsl-query-string-query.html#query-string-syntax
+  # OpenSearch query string. Read the OpenSearch query string documentation.
+  # for more info at: https://www.elastic.co/guide/en/opensearch/reference/master/query-dsl-query-string-query.html#query-string-syntax
   config :query, :validate => :string
 
-  # File path to elasticsearch query in DSL format. Read the Elasticsearch query documentation
-  # for more info at: https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl.html
+  # File path to opensearch query in DSL format. Read the OpenSearch query documentation
+  # for more info at: https://www.elastic.co/guide/en/opensearch/reference/current/query-dsl.html
   config :query_template, :validate => :string
 
   # Comma-delimited list of `<field>:<direction>` pairs that define the sort order
   config :sort, :validate => :string, :default => "@timestamp:desc"
 
-  # Array of fields to copy from old event (found via elasticsearch) into new event
+  # Array of fields to copy from old event (found via opensearch) into new event
   config :fields, :validate => :array, :default => {}
 
-  # Hash of docinfo fields to copy from old event (found via elasticsearch) into new event
+  # Hash of docinfo fields to copy from old event (found via opensearch) into new event
   config :docinfo_fields, :validate => :hash, :default => {}
 
-  # Hash of aggregation names to copy from elasticsearch response into Logstash event fields
+  # Hash of aggregation names to copy from opensearch response into Logstash event fields
   config :aggregation_fields, :validate => :hash, :default => {}
 
   # Basic Auth - username
@@ -55,8 +55,8 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
   # For more info, check out the https://www.elastic.co/guide/en/logstash/current/connecting-to-cloud.html#_cloud_auth[Logstash-to-Cloud documentation]
   config :cloud_auth, :validate => :password
 
-  # Authenticate using Elasticsearch API key.
-  # format is id:api_key (as returned by https://www.elastic.co/guide/en/elasticsearch/reference/current/security-api-create-api-key.html[Create API key])
+  # Authenticate using OpenSearch API key.
+  # format is id:api_key (as returned by https://www.elastic.co/guide/en/opensearch/reference/current/security-api-create-api-key.html[Create API key])
   config :api_key, :validate => :password
 
   # Set the address of a forward HTTP proxy.
@@ -127,7 +127,7 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
   config :result_size, :validate => :number, :default => 1
 
   # Tags the event on failure to look up geo information. This can be used in later analysis.
-  config :tag_on_failure, :validate => :array, :default => ["_elasticsearch_lookup_failure"]
+  config :tag_on_failure, :validate => :array, :default => ["_opensearch_lookup_failure"]
 
   # How many times to retry on failure?
   config :retry_on_failure, :validate => :number, :default => 0
@@ -195,12 +195,15 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
         params[:q] = query
         params[:size] = result_size
         params[:sort] =  @sort if @enable_sort
+        unless fields.empty?
+          params[:_source] = fields.keys
+        end
       end
 
-      @logger.debug("Querying elasticsearch for lookup", :params => params)
+      @logger.debug("Querying opensearch for lookup", :params => params)
 
       results = get_client.search(params)
-      raise "Elasticsearch query error: #{results["_shards"]["failures"]}" if results["_shards"].include? "failures"
+      raise "OpenSearch query error: #{results["_shards"]["failures"]}" if results["_shards"].include? "failures"
 
       event.set("[@metadata][total_hits]", extract_total_from_hits(results['hits']))
 
@@ -233,11 +236,11 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
 
     rescue => e
       if @logger.trace?
-        @logger.warn("Failed to query elasticsearch for previous event", :index => @index, :query => query, :event => event.to_hash, :error => e.message, :backtrace => e.backtrace)
+        @logger.warn("Failed to query opensearch for previous event", :index => @index, :query => query, :event => event.to_hash, :error => e.message, :backtrace => e.backtrace)
       elsif @logger.debug?
-        @logger.warn("Failed to query elasticsearch for previous event", :index => @index, :error => e.message, :backtrace => e.backtrace)
+        @logger.warn("Failed to query opensearch for previous event", :index => @index, :error => e.message, :backtrace => e.backtrace)
       else
-        @logger.warn("Failed to query elasticsearch for previous event", :index => @index, :error => e.message)
+        @logger.warn("Failed to query opensearch for previous event", :index => @index, :error => e.message)
       end
       @tag_on_failure.each{|tag| event.tag(tag)}
     else
@@ -253,8 +256,8 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
     jvm_vendor = java.lang.System.getProperty('java.vendor')
     jvm_version = java.lang.System.getProperty('java.version')
 
-    plugin_version = Gem.loaded_specs['logstash-filter-elasticsearch'].version
-    # example: logstash/7.14.1 (OS=Linux-5.4.0-84-generic-amd64; JVM=AdoptOpenJDK-11.0.11) logstash-output-elasticsearch/11.0.1
+    plugin_version = Gem.loaded_specs['logstash-filter-opensearch'].version
+    # example: logstash/7.14.1 (OS=Linux-5.4.0-84-generic-amd64; JVM=AdoptOpenJDK-11.0.11) logstash-output-opensearch/11.0.1
     "logstash/#{LOGSTASH_VERSION} (OS=#{os_name}-#{os_version}-#{os_arch}; JVM=#{jvm_vendor}-#{jvm_version}) logstash-#{@plugin_type}-#{config_name}/#{plugin_version}"
   end
 
@@ -346,7 +349,7 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
   def new_client
     # NOTE: could pass cloud-id/cloud-auth to client but than we would need to be stricter on ES version requirement
     # and also LS parsing might differ from ES client's parsing so for consistency we do not pass cloud options ...
-    LogStash::Filters::ElasticsearchClient.new(@logger, @hosts, client_options)
+    LogStash::Filters::OpenSearchClient.new(@logger, @hosts, client_options)
   end
 
   def get_client
@@ -373,14 +376,14 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
     end
   end
 
-  # Given a "hits" object from an Elasticsearch response, return the total number of hits in
+  # Given a "hits" object from an OpenSearch response, return the total number of hits in
   # the result set.
   # @param hits [Hash{String=>Object}]
   # @return [Integer]
   def extract_total_from_hits(hits)
     total = hits['total']
 
-    # Elasticsearch 7.x produces an object containing `value` and `relation` in order
+    # OpenSearch 7.x produces an object containing `value` and `relation` in order
     # to enable unambiguous reporting when the total is only a lower bound; if we get
     # an object back, return its `value`.
     return total['value'] if total.kind_of?(Hash)
@@ -447,7 +450,7 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
     rescue ArgumentError => e
       raise LogStash::ConfigurationError, e.message.to_s.sub(/Cloud Id/i, 'cloud_id')
     end
-    cloud_uri = "#{cloud_id.elasticsearch_scheme}://#{cloud_id.elasticsearch_host}"
+    cloud_uri = "#{cloud_id.opensearch_scheme}://#{cloud_id.opensearch_host}"
     LogStash::Util::SafeURI.new(cloud_uri)
   end
 
@@ -471,8 +474,8 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
   def test_connection!
     begin
       get_client.client.ping
-    rescue Elasticsearch::UnsupportedProductError
-      raise LogStash::ConfigurationError, "Could not connect to a compatible version of Elasticsearch"
+    rescue OpenSearch::UnsupportedProductError
+      raise LogStash::ConfigurationError, "Could not connect to a compatible version of OpenSearch"
     end
   end
 
@@ -483,8 +486,8 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
       get_client.info
     end
   rescue => e
-    @logger.error("Failed to retrieve Elasticsearch info", message: e.message, exception: e.class, backtrace: e.backtrace)
-    raise LogStash::ConfigurationError, "Could not connect to a compatible version of Elasticsearch"
+    @logger.error("Failed to retrieve OpenSearch info", message: e.message, exception: e.class, backtrace: e.backtrace)
+    raise LogStash::ConfigurationError, "Could not connect to a compatible version of OpenSearch"
   end
 
   def setup_ssl_params!
@@ -530,4 +533,4 @@ class LogStash::Filters::Elasticsearch < LogStash::Filters::Base
     hosts.all? { |host| host && host.to_s.start_with?("https") }
   end
 
-end #class LogStash::Filters::Elasticsearch
+end #class LogStash::Filters::OpenSearch
